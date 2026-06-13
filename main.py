@@ -1,0 +1,87 @@
+"""Decentralized Collaborative Canvas — CLI.
+
+  demo               convergence proof + live P2P mesh drawing + PNG render
+  peer  --port --seeds --id   run a backend-free P2P canvas node
+  web   --port       serve the browser canvas UI
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import os
+import random
+
+
+def _cmd_demo(_args) -> int:
+    from src.demo import main as demo_main
+    return demo_main()
+
+
+async def _run_peer(port, seeds, peer_id):
+    from src.mesh import PeerNode
+    node = PeerNode(peer_id)
+    bound = await node.start("0.0.0.0", port)
+    print(f"Peer {peer_id} listening on :{bound}")
+    for seed in seeds:
+        host, _, p = seed.partition(":")
+        await node.connect_to(host, int(p))
+        print(f"  joined {seed}")
+    rng = random.Random(hash(peer_id) & 0xffff)
+    kind = rng.choice(["rect", "ellipse", "line"])
+    color = rng.choice(["red", "green", "blue", "yellow"])
+    await node.add_shape(kind, rng.random() * 0.6, rng.random() * 0.6, 0.25, 0.25, color)
+    print(f"  drew a {color} {kind}; syncing. Ctrl-C to stop.")
+    try:
+        while True:
+            await asyncio.sleep(2)
+            print(f"[{peer_id}] {len(node.replica.shapes())} shapes / "
+                  f"{len(node.replica.have())} DAG nodes")
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        await node.stop()
+
+
+def _cmd_peer(args) -> int:
+    seeds = [s for s in (args.seeds.split(",") if args.seeds else []) if s]
+    asyncio.run(_run_peer(args.port, seeds, args.id))
+    return 0
+
+
+def _cmd_web(args) -> int:
+    import http.server
+    import socketserver
+    web_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+    os.chdir(web_dir)
+    with socketserver.TCPServer((args.host, args.port),
+                                http.server.SimpleHTTPRequestHandler) as httpd:
+        print(f"Canvas UI at http://localhost:{args.port}/")
+        httpd.serve_forever()
+    return 0
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(description="Decentralized Collaborative Canvas")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    d = sub.add_parser("demo", help="convergence proof + live mesh + render")
+    d.set_defaults(func=_cmd_demo)
+
+    pe = sub.add_parser("peer", help="run a backend-free P2P canvas node")
+    pe.add_argument("--port", type=int, default=0)
+    pe.add_argument("--seeds", default="", help="comma-separated host:port seeds")
+    pe.add_argument("--id", default="peer")
+    pe.set_defaults(func=_cmd_peer)
+
+    w = sub.add_parser("web", help="serve the browser canvas UI")
+    w.add_argument("--host", default="0.0.0.0")
+    w.add_argument("--port", type=int, default=8080)
+    w.set_defaults(func=_cmd_web)
+
+    args = p.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

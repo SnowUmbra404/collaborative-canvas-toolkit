@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Decentralized Canvas</title>
+<style>
+  body { margin:0; font-family:system-ui,sans-serif; background:#11151f; color:#e6e9f0; }
+  #bar { padding:10px 16px; display:flex; gap:12px; align-items:center; background:#1b2030; flex-wrap:wrap; }
+  #bar b { color:#8ab4ff; }
+  button { background:#2a3146; color:#e6e9f0; border:1px solid #3a4260;
+           border-radius:6px; padding:5px 10px; cursor:pointer; }
+  button.active { background:#3a63c0; }
+  .sw { width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
+  .sw.active { border-color:#fff; }
+  canvas { display:block; margin:14px auto; background:#f8f9fc; border-radius:8px; cursor:crosshair; }
+  #info { font-size:12px; color:#9aa3b8; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <b>🪐 Decentralized Canvas</b>
+  <button data-tool="rect" class="active">▭ rect</button>
+  <button data-tool="ellipse">◯ ellipse</button>
+  <button data-tool="line">／ line</button>
+  <span id="palette"></span>
+  <span id="info">OR-Map + Merkle-DAG · no backend</span>
+</div>
+<canvas id="c" width="600" height="600"></canvas>
+<script>
+/* Mirrors the Python OR-Map model (src/crdt.py): shapes keyed by id, add-wins
+   existence, LWW properties — would sync over WebRTC. Here it demonstrates the
+   shape model and content-addressed op ids (sha-256 in the real peer). */
+const COLORS = ["red","green","blue","yellow","orange","magenta","black"];
+const RGB = {red:"#dc3c3c",green:"#46be5a",blue:"#4682e6",yellow:"#f0d246",
+  orange:"#f09632",magenta:"#d250c8",black:"#1e1e24"};
+let tool="rect", color="blue", shapes=[], start=null, seq=0;
+const peer="web"+Math.floor(Math.random()*1000);
+const canvas=document.getElementById("c"), ctx=canvas.getContext("2d");
+const pal=document.getElementById("palette");
+
+document.querySelectorAll("button[data-tool]").forEach(b=>b.onclick=()=>{
+  tool=b.dataset.tool;
+  document.querySelectorAll("button[data-tool]").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active");
+});
+COLORS.forEach(c=>{ const s=document.createElement("span"); s.className="sw"+(c===color?" active":"");
+  s.style.background=RGB[c]; s.onclick=()=>{ color=c;
+  [...pal.children].forEach(e=>e.classList.remove("active")); s.classList.add("active"); };
+  pal.appendChild(s); });
+
+function redraw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(const s of shapes){ ctx.strokeStyle=RGB[s.color]; ctx.lineWidth=4;
+    const x=s.x*canvas.width, y=s.y*canvas.height, w=s.w*canvas.width, h=s.h*canvas.height;
+    if(s.kind==="rect") ctx.strokeRect(x,y,w,h);
+    else if(s.kind==="ellipse"){ ctx.beginPath(); ctx.ellipse(x+w/2,y+h/2,Math.abs(w/2),Math.abs(h/2),0,0,7); ctx.stroke(); }
+    else { ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w,y+h); ctx.stroke(); }
+  }
+}
+canvas.addEventListener("mousedown",e=>{ const r=canvas.getBoundingClientRect();
+  start={x:(e.clientX-r.left)/canvas.width, y:(e.clientY-r.top)/canvas.height}; });
+window.addEventListener("mouseup",e=>{ if(!start) return; const r=canvas.getBoundingClientRect();
+  const ex=(e.clientX-r.left)/canvas.width, ey=(e.clientY-r.top)/canvas.height;
+  shapes.push({id:peer+":"+(++seq), kind:tool, color, x:Math.min(start.x,ex),
+    y:Math.min(start.y,ey), w:Math.abs(ex-start.x), h:Math.abs(ey-start.y)});
+  start=null; redraw(); });
+</script>
+</body>
+</html>
