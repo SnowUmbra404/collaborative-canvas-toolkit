@@ -21,6 +21,13 @@ Three peers — alice (face), bob (eyes), cara (mouth + frame) — draw concurre
 and converge to the same picture (`out/canvas.png`): a yellow face with blue eyes,
 a red mouth, and a black frame.
 
+![Three peers' shapes arrive shuffled and the canvas materializes into one converged face](out/converge.gif)
+
+> *CRDT convergence you can watch:* `uv run python main.py demo --gif`. The Merkle-DAG op-set is
+> replayed in a deterministically **shuffled** order and folded in one node at a time — the shapes
+> pop into place out of order, yet every peer ends on the **exact same face** (the fold uses the DAG's
+> topological order, so arrival order can't change the result). No backend, no coordinator.
+
 ## What makes it different
 
 This is the third CRDT in the portfolio, and deliberately a *different* kind:
@@ -48,11 +55,11 @@ src/
   crdt.py      OR-Map fold: add-wins existence + LWW properties -> shapes
   replica.py   a peer: DAG + derived state + op authoring + verify-on-receive
   mesh.py      P2P node: have/want anti-entropy + op flood (no server)
-  render.py    rasterize shapes to PNG + ASCII preview
+  render.py    rasterize shapes to PNG + ASCII + convergence GIF
   demo.py      convergence proof + live mesh drawing a face + render
-main.py        CLI: demo | peer | web
+main.py        CLI: demo [--gif] | peer | web
 web/index.html browser canvas (mirrors the shape/OR-Map model)
-tests/         29 tests (DAG, CRDT semantics incl. add-wins & tamper, live mesh)
+tests/         32 tests (DAG, CRDT semantics incl. add-wins & tamper, live mesh)
 ```
 
 ## Quick start
@@ -63,6 +70,7 @@ uv sync
 # Convergence proof + live 3-peer mesh drawing + PNG render
 uv run python main.py demo
 #   → out/canvas.png
+uv run python main.py demo --gif    # also writes out/converge.gif (canvas materializing)
 
 # Run your own backend-free P2P node and join a mesh
 uv run python main.py peer --port 9201 --id alice
@@ -93,7 +101,7 @@ uv run python main.py web --port 8080
 ## CLI
 
 ```
-demo                          convergence proof + live mesh + PNG render
+demo  [--gif]                 convergence proof + live mesh + PNG (+ out/converge.gif)
 peer  --port --id --seeds     run a backend-free P2P canvas node
 web   --host --port           serve the browser canvas UI
 ```
@@ -104,10 +112,12 @@ web   --host --port           serve the browser canvas UI
 uv run pytest -q
 ```
 
-29 tests: the Merkle-DAG (content hashing, parent linking, topological order,
+32 tests: the Merkle-DAG (content hashing, parent linking, topological order,
 tamper detection, missing-node sync), the OR-Map CRDT (add-wins existence, LWW
-properties, **convergence fuzzed over 40 scenarios**, tamper rejection), and live
-2–3 peer mesh integration (have/want sync, flood, remove propagation).
+properties, **convergence fuzzed over 40 scenarios**, tamper rejection), live
+2–3 peer mesh integration (have/want sync, flood, remove propagation), and the
+**convergence GIF** (valid `GIF89a`, frame-per-node count, the shuffled fold equals
+the converged `shapes()`, and byte-stable output for a fixed seed).
 
 ## Why it's interesting
 

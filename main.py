@@ -14,9 +14,19 @@ import os
 import random
 
 
-def _cmd_demo(_args) -> int:
+def _cmd_demo(args) -> int:
     from src.demo import main as demo_main
-    return demo_main()
+    rc = demo_main()
+    if getattr(args, "gif", False):
+        from src.demo import live_demo
+        from src.render import render_gif
+        os.makedirs("out", exist_ok=True)
+        board = asyncio.run(live_demo())["replica"]
+        nodes = list(board.dag.nodes.values())
+        n = render_gif(nodes, "out/converge.gif", peers=3)
+        print(f"  saved convergence GIF -> out/converge.gif ({n} frames, "
+              f"{len(nodes)} DAG nodes shuffled into place)")
+    return rc
 
 
 async def _run_peer(port, seeds, peer_id):
@@ -65,6 +75,8 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("demo", help="convergence proof + live mesh + render")
+    d.add_argument("--gif", action="store_true",
+                   help="also write out/converge.gif (canvas materializing op-by-op)")
     d.set_defaults(func=_cmd_demo)
 
     pe = sub.add_parser("peer", help="run a backend-free P2P canvas node")
