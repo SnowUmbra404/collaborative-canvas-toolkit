@@ -1,5 +1,6 @@
 """Decentralized Collaborative Canvas — CLI.
 
+  viz-dag           render the DAG growth as a GIF
   demo               convergence proof + live P2P mesh drawing + PNG render
   peer  --port --seeds --id   run a backend-free P2P canvas node
   web   --port       serve the browser canvas UI
@@ -27,6 +28,17 @@ def _cmd_demo(args) -> int:
         print(f"  saved convergence GIF -> out/converge.gif ({n} frames, "
               f"{len(nodes)} DAG nodes shuffled into place)")
     return rc
+
+
+def _cmd_viz_dag(args) -> int:
+    from src.demo import live_demo
+    from src.viz_dag import render_dag
+    os.makedirs("out", exist_ok=True)
+    board = asyncio.run(live_demo())["replica"]
+    nodes = list(board.dag.nodes.values())
+    n = render_dag(nodes, "out/dag.gif")
+    print(f"  saved DAG growth GIF -> out/dag.gif ({n} frames)")
+    return 0
 
 
 async def _run_peer(port, seeds, peer_id):
@@ -78,6 +90,9 @@ def main(argv=None) -> int:
     d.add_argument("--gif", action="store_true",
                    help="also write out/converge.gif (canvas materializing op-by-op)")
     d.set_defaults(func=_cmd_demo)
+
+    vd = sub.add_parser("viz-dag", help="render the DAG growth as a GIF")
+    vd.set_defaults(func=_cmd_viz_dag)
 
     pe = sub.add_parser("peer", help="run a backend-free P2P canvas node")
     pe.add_argument("--port", type=int, default=0)

@@ -150,3 +150,65 @@ convincing demonstration of *why* you'd build on a content-addressed CRDT instea
 **Share-worthy angle:** A split-screen clip where two halves of a peer network **go offline, draw different
 things, then reconnect and heal into the exact same picture** — no server, no lost strokes — captioned
 "this is what 'offline-first' actually means," backed by a content-addressed Merkle-CRDT.
+
+---
+
+## Iteration 4 (2026-06-14)
+**Theme:** Save, Share, Merge — Portable Canvas Files
+
+**Why this iteration:** Iterations 1–3 were all in-process *property demos* (convergence, the Merkle-DAG,
+partition/heal). Two practical gaps remain that keep this from being a *usable* tool: there's **no
+persistence** (close the process and your drawing is gone) and **no way to exchange a canvas between two
+people who can't connect**. Both are solved at once by leaning on the thing that makes this project special —
+**content addressing**: serialize the Merkle-DAG to a `.canvas` file, and importing one is just `add_op` over
+each node, so it **dedupes and merges automatically**. The result is the purest "decentralized" story of all:
+**no server, no WebRTC, not even a live connection** — two people email each other a small file and their
+drawings merge perfectly. It's a real feature (save/load + offline interchange), not another demo.
+
+**What this adds:**
+- **Persistence**: `save <file.canvas>` / `open <file.canvas>` — write the replica's DAG (the
+  content-addressed node set) to disk and reload it, reconstructing the exact canvas (state is a pure fold
+  over the DAG, so load is deterministic).
+- **Offline file-merge**: `merge <a.canvas> <b.canvas> [--out merged.canvas]` — import both node sets into one
+  replica; because nodes are content-addressed, **duplicates collapse and the union converges** to one
+  canvas regardless of order. Print `imported A=12 nodes, B=10, shared=6, merged=16, shapes=N`.
+- A **two-person "sneakernet" demo**: alice and bob each draw offline, `save` their files, swap, `merge`, and
+  render — proving two never-connected peers converge by passing a file. Render the merged `out/merged.png`.
+
+**Implementation notes (keep it lean — reuse the DAG serialization):**
+- Reuse `HashDAG`/`Node.to_dict`/`from_dict` and `Replica` — `save` dumps `{nodes:[node.to_dict()...]}` as
+  JSON; `open`/`merge` calls `add_op`/the node-add path for each, which already verifies hashes (tamper
+  rejection from Iteration 2 applies on import) and dedupes. Do NOT change `crdt.py`/`hashdag.py`/`mesh.py`
+  semantics — this is serialization + a thin driver.
+- Versioned header (`{"format":"dcc-canvas","v":1, ...}`); reject/ignore nodes whose content hash doesn't
+  match their id (corrupt/tampered files surface, not silently merge). Reuse `render_png` for the output.
+- Add `save`/`open`/`merge` to `main.py`; leave `demo`/`peer`/`web`/Iteration 1–3 commands untouched.
+
+**Testing (deterministic, offline):**
+- `test_save_load_roundtrip`: save a replica, load it into a fresh replica → identical shapes and identical
+  DAG head set (persistence is faithful).
+- `test_file_merge_converges`: two replicas drawing different shapes → merging their files (in either order)
+  yields the same canvas, and `merged_nodes == |A ∪ B|` with `shared == |A ∩ B|` (dedup by content hash is
+  real); a node tampered on disk is rejected on import.
+- `test_merge_is_order_independent`: `merge(a,b) == merge(b,a)` in shapes and heads. Keep the Iteration 1–3
+  convergence/DAG/partition tests and all CRDT/mesh tests green.
+
+**Share-worthy angle:** Two people who **never connect** each draw, save a tiny `.canvas` file, email it to
+each other, and `merge` — and their doodles fuse into one identical picture, duplicates collapsing for free —
+"version control for drawings: no server, no network, just a file," from a content-addressed Merkle-CRDT.
+
+## Iteration 5 (2026-06-13)
+**Theme:** Branch & Merge Your Drawing
+**Why this iteration:** The project has built the whole git metaphor — a content-addressed Merkle-DAG (Iter 2), partition/heal (Iter 3), portable files (Iter 4) — but you still can't do the *operations* git is famous for. Adding **checkout** (rewind the canvas to any past commit), **branch** (fork from there), and **merge** (fuse two branches via the CRDT) completes the metaphor and turns the drawing into a true version-controlled artifact: "try a risky edit on a branch, keep it or throw it away."
+**What this adds:**
+- **`checkout <commit>`**: reconstruct the canvas at any node in the Merkle-DAG (a past state) by replaying the ops in that commit's causal ancestry — non-destructive time travel.
+- **`branch`/`fork`**: start a new line of edits from any commit; edits on different branches are independent.
+- **`merge <branch>`**: combine two branches via the **existing CRDT merge** (op-set union — commutative/idempotent, so it's conflict-free), with the resulting branch graph rendered git-log style (lanes diverging and rejoining).
+- A demo: draw a base, branch, add a hat on one branch and a smile on the other, merge → both appear.
+**Implementation notes (keep it lean):**
+- Reuse the Merkle-DAG from Iteration 2: a **commit** = a DAG node (its ancestry = the op set up to it). `checkout` = build a fresh canvas from that ancestor set (reuse `add_op`); `branch` = a named pointer to a commit; `merge` = union the two branches' op sets (the CRDT already makes this order-independent) and snapshot a merge commit. No new convergence logic — branches are just different frontiers over the same op-DAG.
+- Render the branch graph by reusing the Iteration-2 DAG renderer with lane assignment per branch.
+- `main.py`: `branch`/`checkout`/`merge` + a demo.
+**Testing (deterministic, offline):**
+- **Checkout** reconstructs the exact canvas state that existed at a given commit (digest matches the historical state). (2) **Branch isolation:** edits on branch B don't affect branch A's canvas until merged. (3) **Merge = union:** merging two branches yields the canvas containing **both** branches' strokes, identical regardless of merge order (commutativity), with duplicate ops collapsing. (4) The merged commit's ancestry includes both parents (a valid DAG); deterministic.
+**Share-worthy angle:** `branch`, draw a wild idea, `merge` it back (or throw it away) — full checkout/branch/merge for a *drawing*, with a git-log graph of lanes splitting and rejoining, all conflict-free on a content-addressed Merkle-CRDT.
