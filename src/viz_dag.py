@@ -2,7 +2,7 @@ import os
 import random
 from PIL import Image, ImageDraw
 from src.hashdag import Node
-from src.render import _rgb, BG
+from src.core.render import _rgb, BG
 
 def render_dag(nodes, path: str, *, size: int = 600, duration: int = 300) -> int:
     """Render the DAG growth as a GIF."""

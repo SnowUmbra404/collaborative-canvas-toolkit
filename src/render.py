@@ -4,20 +4,8 @@ import random
 
 from PIL import Image, ImageDraw, ImageFont
 
-from src.core.render import _rgb, BG, scene_to_image, scene_to_ascii
+from src.core.render import scene_to_image, scene_to_ascii
 from src.core.scene import Scene
-
-PALETTE = {
-    "red": (220, 60, 60), "green": (70, 190, 90), "blue": (70, 130, 230),
-    "yellow": (240, 210, 70), "magenta": (210, 80, 200), "cyan": (70, 200, 210),
-    "orange": (240, 150, 50), "black": (30, 30, 36), "white": (235, 235, 235),
-}
-
-
-def _canvas_image(shapes, size: int) -> Image.Image:
-    from src.core.scene import Shape
-    scene = Scene(width=size, height=size, drawables=list(shapes))
-    return scene_to_image(scene, size)
 
 
 def render_png(replica, path: str, size: int = 400) -> None:

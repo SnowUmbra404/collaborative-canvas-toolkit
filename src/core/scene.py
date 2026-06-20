@@ -13,7 +13,7 @@ class PixelCell:
 
 @dataclass(frozen=True)
 class Stroke:
-    points: tuple
+    points: tuple[tuple[float, float], ...]
     color: str
     width: int
 

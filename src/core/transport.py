@@ -65,7 +65,7 @@ class MeshNode:
                     if self.replica.apply_remote(op):
                         await self._broadcast({"t": "op", "op": op}, exclude=writer)
         except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError,
-                OSError, json.JSONDecodeError):
+                OSError, json.JSONDecodeError, KeyError, ValueError):
             pass
         finally:
             self._writers.discard(writer)

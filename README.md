@@ -1,127 +1,99 @@
-# Decentralized Collaborative Canvas
+# collaborative-canvas-toolkit
 
-A backend-free collaborative **shape whiteboard**. There is no server: each peer
-holds the full document as an **OR-Map CRDT** and peers synchronize over a P2P
-mesh using a **Merkle-DAG of content-addressed operations** — the same idea behind
-Git commits and IPFS / Merkle-CRDTs. The history is tamper-evident, deduplicates
-automatically, and replays deterministically, so every peer converges.
+A pluggable CRDT collaborative canvas with three backends demonstrating the full range of CRDT trade-offs: LWW pixel registers, RGA causal strokes, and OR-Map + Merkle-DAG shapes. All three share two narrow interfaces and one generic transport — the rest is genuinely backend-specific.
 
+## The two interfaces
+
+### 1. Replica protocol (`src/core/replica.py`)
+
+```python
+class Replica(Protocol):
+    peer_id: str
+    def apply_local(intent: dict) -> Op       # local edit -> serializable op
+    def apply_remote(op: Op) -> bool          # idempotent; True if state changed
+    def digest() -> tuple                     # order-independent convergence fingerprint
+    def summary() -> Summary                  # opaque anti-entropy token
+    def delta_since(summary) -> list[Op]      # ops the peer is missing
+    def scene() -> Scene
 ```
-$ uv run python main.py demo
-Decentralized Collaborative Canvas (OR-Map + Merkle-DAG)
-========================================================
-[CRDT proof] 4 peers, DAG nodes delivered shuffled+duplicated
-  converged: True  (3 shapes, 22 DAG nodes)
-[live P2P mesh] 3 peers draw a face (no backend, content-addressed sync)
-  all peers converged: True  (5 shapes from 5 ops)
-  saved render to out/canvas.png
-```
 
-Three peers — alice (face), bob (eyes), cara (mouth + frame) — draw concurrently
-and converge to the same picture (`out/canvas.png`): a yellow face with blue eyes,
-a red mouth, and a black frame.
+Anti-entropy strategies per backend:
 
-![Three peers' shapes arrive shuffled and the canvas materializes into one converged face](out/converge.gif)
+| Backend | `summary()` | `delta_since(s)` |
+|---------|-------------|-----------------|
+| LWW     | `None` | all ops (full dump) |
+| RGA     | version-vector `{peer: max_seq}` | elements with seq > vv |
+| OR-Map  | sorted list of known hashes | topologically-ordered missing nodes |
 
-> *CRDT convergence you can watch:* `uv run python main.py demo --gif`. The Merkle-DAG op-set is
-> replayed in a deterministically **shuffled** order and folded in one node at a time — the shapes
-> pop into place out of order, yet every peer ends on the **exact same face** (the fold uses the DAG's
-> topological order, so arrival order can't change the result). No backend, no coordinator.
+### 2. Scene / Drawable (`src/core/scene.py`)
 
-## What makes it different
+Tagged union over normalized [0,1] coordinates consumed by one renderer:
 
-This is the third CRDT in the portfolio, and deliberately a *different* kind:
+- `PixelCell(x, y, color)` — LWW backend
+- `Stroke(points, color, width)` — RGA backend
+- `Shape(id, kind, x, y, w, h, color)` — OR-Map backend
 
-| Project | CRDT | Sync |
-|---------|------|------|
-| pixel canvas | LWW-Element-Map | full-state gossip |
-| vector strokes | sequence CRDT (RGA) | version-vector deltas |
-| **this** | **OR-Map (add-wins + LWW)** | **Merkle-DAG content-addressed have/want** |
+## Backends compared
 
-- **OR-Set add-wins existence**: each `add` contributes a unique tag (the op's
-  hash); a `remove` cancels only the tags it *observed*. An add concurrent with a
-  remove survives — verified by a dedicated test.
-- **LWW property registers**: position/colour/size resolve by `(lamport, peer)`.
-- **Merkle-DAG history**: every op is a node `id = sha256(content + parents)`.
-  Parent links encode causality; identical ops dedupe; tampering is detectable
-  (the id won't match the content). State is a pure fold over the DAG, so the same
-  node-set always yields the same canvas.
+| Backend | Document model | Merge | Anti-entropy | Causality |
+|---------|----------------|-------|--------------|-----------|
+| LWW `backends/lww.py` | pixel register map | last-writer-wins `(ts, peer_id)` | full dump | Lamport clock |
+| RGA `backends/rga.py` | ordered stroke sequence | causal tree, id-descending siblings | version-vector delta | per-peer sequence |
+| OR-Map `backends/ormap.py` + `backends/hashdag.py` | shape map | add-wins OR-Set + LWW property registers | Merkle-DAG have/want | DAG Lamport |
 
-## Architecture
+## Layout
 
 ```
 src/
-  hashdag.py   content-addressed Merkle-DAG: add_op, heads, topological, missing_for
-  crdt.py      OR-Map fold: add-wins existence + LWW properties -> shapes
-  replica.py   a peer: DAG + derived state + op authoring + verify-on-receive
-  mesh.py      P2P node: have/want anti-entropy + op flood (no server)
-  render.py    rasterize shapes to PNG + ASCII + convergence GIF
-  demo.py      convergence proof + live mesh drawing a face + render
-main.py        CLI: demo [--gif] | peer | web
-web/index.html browser canvas (mirrors the shape/OR-Map model)
-tests/         32 tests (DAG, CRDT semantics incl. add-wins & tamper, live mesh)
+  core/
+    scene.py       Drawable union + Scene
+    replica.py     Replica protocol
+    transport.py   Generic async TCP mesh (summary→delta→op, no backend branches)
+    clock.py       Lamport clock
+    render.py      Scene → PNG / GIF / ASCII
+    harness.py     Parametrized SEC convergence harness
+  backends/
+    lww.py         LWW pixel backend
+    rga.py         RGA stroke backend
+    ormap.py       OR-Map fold logic (fold_ops takes list[Node])
+    hashdag.py     Merkle-DAG anti-entropy (standalone from OR-Map)
+  cli/main.py      --backend {lww,rga,ormap} demo|render
+tests/
+  test_lww.py      LWW unit + property (9 tests)
+  test_rga.py      RGA unit + property (10 tests)
+  test_crdt.py     OR-Map unit + property (10 tests)
+  test_hashdag.py  Merkle-DAG (13 tests)
+  test_harness.py  Cross-backend SEC fuzz — 51 parametrized tests across all 3
+  test_mesh.py     OR-Map live P2P mesh integration (7 tests)
+  test_render_gif.py  Render tests (3 tests)
 ```
 
 ## Quick start
 
 ```bash
 uv sync
-
-# Convergence proof + live 3-peer mesh drawing + PNG render
-uv run python main.py demo
-#   → out/canvas.png
-uv run python main.py demo --gif    # also writes out/converge.gif (canvas materializing)
-
-# Run your own backend-free P2P node and join a mesh
-uv run python main.py peer --port 9201 --id alice
-uv run python main.py peer --port 9202 --id bob --seeds 127.0.0.1:9201
-
-# Serve the browser canvas UI
-uv run python main.py web --port 8080
-```
-
-## How sync works (content-addressed have/want)
-
-1. On connect, a peer announces the set of node **hashes** it already has.
-2. The remote replies with exactly the nodes the peer is missing, **in
-   topological order** (parents before children), so causal dependencies always
-   arrive first.
-3. New ops are flooded; because nodes are content-addressed, duplicates are
-   no-ops and the mesh converges.
-
-## How convergence is proven
-
-1. **OR-Map fuzz** — 40 randomized scenarios (add/move/remove) with every DAG node
-   delivered shuffled + duplicated; all replicas converge.
-2. **Add-wins test** — an add concurrent with (unobserved by) a remove survives.
-3. **Tamper test** — a node whose content doesn't match its hash is rejected.
-4. **Live P2P mesh** — real peers draw concurrently and converge, including a
-   chain topology (two-hop flood) and delta-sync-on-connect.
-
-## CLI
-
-```
-demo  [--gif]                 convergence proof + live mesh + PNG (+ out/converge.gif)
-peer  --port --id --seeds     run a backend-free P2P canvas node
-web   --host --port           serve the browser canvas UI
-```
-
-## Tests
-
-```bash
 uv run pytest -q
+
+uv run python -m src.cli.main --backend lww demo
+uv run python -m src.cli.main --backend rga demo
+uv run python -m src.cli.main --backend ormap demo
+
+uv run python -m src.cli.main --backend lww render
 ```
 
-32 tests: the Merkle-DAG (content hashing, parent linking, topological order,
-tamper detection, missing-node sync), the OR-Map CRDT (add-wins existence, LWW
-properties, **convergence fuzzed over 40 scenarios**, tamper rejection), live
-2–3 peer mesh integration (have/want sync, flood, remove propagation), and the
-**convergence GIF** (valid `GIF89a`, frame-per-node count, the shuffled fold equals
-the converged `shapes()`, and byte-stable output for a fixed seed).
+## What the three backends demonstrate
 
-## Why it's interesting
+The toolkit makes one comparison concrete: the same SEC guarantee reached by three genuinely different designs.
 
-- A genuinely decentralized design — content-addressed Merkle history gives dedup,
-  causal ordering, and tamper-evidence for free.
-- Real OR-Set add-wins semantics, not just last-writer-wins.
-- The convergence and security properties are both verified by tests.
+**LWW** is the simplest: no causal structure, just a timestamp tiebreaker per pixel. Anti-entropy is a full state dump — correct but not scalable. Good for small shared pixel maps.
+
+**RGA** preserves insertion *order* across concurrent peers — the property LWW cannot provide. A causal tree gives every stroke a globally-unique id; siblings are ordered by id descending for determinism. Delta sync sends only what a peer is missing (version-vector). Good for sequences where order matters.
+
+**OR-Map + Merkle-DAG** adds tamper-evidence and causal history. Every op becomes a content-addressed DAG node; the OR-Map gives add-wins existence semantics with LWW property registers. Anti-entropy is have/want: announce known hashes, receive only the diff in topological order. Good for structured documents with rich conflict semantics.
+
+## Convergence evidence
+
+- 51 parametrized fuzz tests across all three backends (`test_harness.py`): shuffled + duplicated delivery, 3–5 peers, 15 seeds each
+- OR-Map: add-wins test (add concurrent with unobserved remove survives), tamper rejection
+- Merkle-DAG: content-hash dedup, topological ordering, tamper detection
+- Live P2P mesh: real async TCP peers draw concurrently and converge

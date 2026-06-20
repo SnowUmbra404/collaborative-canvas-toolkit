@@ -68,15 +68,15 @@ class RGAReplica:
 
     def _sequence_ids(self) -> list[Id]:
         out: list[Id] = []
-
-        def walk(node_id: Id | None):
-            for child_id in self._children.get(node_id, []):
+        stack: list[Id | None] = [None]
+        while stack:
+            node_id = stack.pop()
+            children = list(reversed(self._children.get(node_id, [])))
+            for child_id in children:
                 el = self._elements[child_id]
                 if not el.deleted:
                     out.append(child_id)
-                walk(child_id)
-
-        walk(None)
+                stack.append(child_id)
         return out
 
     def _last_id(self) -> Id | None:

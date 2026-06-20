@@ -5,7 +5,7 @@ from src.backends.ormap import CanvasState
 from src.core.scene import Shape, Scene
 
 
-class Replica:
+class ORMapReplica:
     def __init__(self, peer_id: str):
         self.peer_id = peer_id
         self.dag = HashDAG()
@@ -82,3 +82,6 @@ class Replica:
 
     def have(self):
         return self.dag.have()
+
+
+Replica = ORMapReplica
