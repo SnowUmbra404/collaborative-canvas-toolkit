@@ -4,7 +4,7 @@ import pytest
 from src.core.harness import assert_sec
 from src.backends.lww import LWWReplica
 from src.backends.rga import RGAReplica
-from src.replica import Replica as ORMapReplica
+from src.backends.ormap import ORMapReplica
 
 COLORS = ["red", "green", "blue", "yellow", "cyan", "magenta", "white"]
 

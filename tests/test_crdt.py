@@ -1,29 +1,27 @@
-"""Tests for the OR-Map CRDT semantics (add-wins existence + LWW properties)."""
-
 import random
 import pytest
 
-from src.replica import Replica
-from src.hashdag import Node
+from src.backends.ormap import ORMapReplica
+from src.backends.hashdag import Node
 
 
 class TestBasics:
     def test_add_shape_appears(self):
-        r = Replica("a")
+        r = ORMapReplica("a")
         r.add_shape("rect", 0.1, 0.1, 0.2, 0.2, "red")
         shapes = r.shapes()
         assert len(shapes) == 1
         assert shapes[0].kind == "rect" and shapes[0].color == "red"
 
     def test_remove_hides_shape(self):
-        r = Replica("a")
+        r = ORMapReplica("a")
         n = r.add_shape("rect", 0.1, 0.1, 0.2, 0.2, "red")
         sid = n.op["shape_id"]
         r.remove_shape(sid)
         assert len(r.shapes()) == 0
 
     def test_set_props_lww(self):
-        r = Replica("a")
+        r = ORMapReplica("a")
         n = r.add_shape("rect", 0.1, 0.1, 0.2, 0.2, "red")
         sid = n.op["shape_id"]
         r.set_props(sid, x=0.5, color="blue")
@@ -36,13 +34,13 @@ class TestConvergence:
         nodes = [n.to_dict() for r in replicas for n in r.dag.nodes.values()]
         rng = random.Random(0)
         for r in replicas:
-            delivery = list(nodes) + nodes  # duplicated
+            delivery = list(nodes) + nodes
             rng.shuffle(delivery)
             for d in delivery:
                 r.receive_node(Node.from_dict(d))
 
     def test_two_replicas_converge(self):
-        a = Replica("a"); b = Replica("b")
+        a = ORMapReplica("a"); b = ORMapReplica("b")
         a.add_shape("rect", 0.1, 0.1, 0.2, 0.2, "red")
         b.add_shape("ellipse", 0.5, 0.5, 0.2, 0.2, "blue")
         self._sync([a, b])
@@ -50,38 +48,33 @@ class TestConvergence:
         assert len(a.shapes()) == 2
 
     def test_concurrent_move_lww_converges(self):
-        a = Replica("a"); b = Replica("b")
+        a = ORMapReplica("a"); b = ORMapReplica("b")
         n = a.add_shape("rect", 0.1, 0.1, 0.2, 0.2, "red")
         sid = n.op["shape_id"]
         b.receive_node(n)
-        # Concurrent moves of the same shape from both peers.
         a.set_props(sid, x=0.3)
         b.set_props(sid, x=0.7)
         self._sync([a, b])
-        assert a.digest() == b.digest()  # LWW picks one deterministically
+        assert a.digest() == b.digest()
 
     def test_add_wins_over_concurrent_remove(self):
-        """An add the remove never observed must survive (OR-Set add-wins)."""
-        a = Replica("a")
+        a = ORMapReplica("a")
         n = a.add_shape("rect", 0.1, 0.1, 0.2, 0.2, "red")
         sid = n.op["shape_id"]
-        # b removes the shape but has NOT observed a second concurrent add.
-        b = Replica("b")
+        b = ORMapReplica("b")
         b.receive_node(n)
-        b.remove_shape(sid)               # observes a's add tag
-        # a, concurrently, re-adds the SAME shape id with a fresh tag.
+        b.remove_shape(sid)
         a.dag.add_op({"type": "add", "peer": "a", "shape_id": sid,
                       "kind": "rect", "x": 0.4, "y": 0.4, "w": 0.2, "h": 0.2,
                       "color": "green"})
         self._sync([a, b])
-        # The second add's tag was never observed by the remove -> shape survives.
         assert a.digest() == b.digest()
         assert len(a.shapes()) == 1
 
     def test_fuzz_convergence(self):
         for seed in range(40):
             rng = random.Random(seed)
-            peers = [Replica(f"p{i}") for i in range(3)]
+            peers = [ORMapReplica(f"p{i}") for i in range(3)]
             for _ in range(15):
                 p = rng.choice(peers)
                 sh = p.shapes()
@@ -99,9 +92,9 @@ class TestConvergence:
 
 class TestTamperRejection:
     def test_tampered_node_rejected(self):
-        a = Replica("a")
+        a = ORMapReplica("a")
         n = a.add_shape("rect", 0.1, 0.1, 0.2, 0.2, "red")
-        b = Replica("b")
+        b = ORMapReplica("b")
         tampered = Node(n.id, {**n.op, "color": "HACKED"}, n.parents, n.lamport)
         assert b.receive_node(tampered) is False
         assert len(b.shapes()) == 0

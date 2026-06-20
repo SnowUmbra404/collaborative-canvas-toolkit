@@ -4,7 +4,7 @@ import pytest
 from src.core.transport import MeshNode
 from src.backends.lww import LWWReplica
 from src.backends.rga import RGAReplica
-from src.replica import Replica as ORMapReplica
+from src.backends.ormap import ORMapReplica
 
 
 async def _two_peer_converge(make_replica):

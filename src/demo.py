@@ -4,18 +4,18 @@ import asyncio
 import os
 import random
 
-from src.replica import Replica
+from src.backends.ormap import ORMapReplica
 from src.backends.hashdag import Node
 from src.backends.lww import LWWReplica
 from src.backends.rga import RGAReplica
-from src.mesh import PeerNode
-from src.core.render import render_scene_png, scene_to_ascii, render_convergence_gif
-from src.render import render_png, to_ascii
+from src.core.transport import MeshNode
+from src.core.render import render_scene_png, scene_to_ascii, render_convergence_gif, scene_to_image
+from src.core.scene import Scene
 
 
 def convergence_proof(seed: int = 5) -> dict:
     rng = random.Random(seed)
-    peers = [Replica(f"p{i}") for i in range(4)]
+    peers = [ORMapReplica(f"p{i}") for i in range(4)]
     kinds = ["rect", "ellipse", "line"]
     colors = ["red", "green", "blue", "yellow"]
     for _ in range(22):
@@ -56,31 +56,35 @@ def _ormap_face():
 
 
 async def live_demo() -> dict:
-    scene = _ormap_face()
-    nodes = {name: PeerNode(name) for name in scene}
-    names = list(nodes)
-    ports = {name: await nodes[name].start() for name in names}
+    face = _ormap_face()
+    replicas = {name: ORMapReplica(name) for name in face}
+    mesh_nodes = {name: MeshNode(replicas[name]) for name in face}
+    names = list(face)
+    ports = {name: await mesh_nodes[name].start() for name in names}
     for i, name in enumerate(names):
         for j in range(i):
-            await nodes[name].connect_to("127.0.0.1", ports[names[j]])
+            await mesh_nodes[name].connect_to("127.0.0.1", ports[names[j]])
     await asyncio.sleep(0.2)
 
-    for name, shapes in scene.items():
+    for name, shapes in face.items():
         for (kind, x, y, w, h, color) in shapes:
-            await nodes[name].add_shape(kind, x, y, w, h, color)
+            await mesh_nodes[name].apply_local({
+                "type": "add", "kind": kind,
+                "x": x, "y": y, "w": w, "h": h, "color": color,
+            })
     await asyncio.sleep(0.6)
 
-    digest_set = {node.replica.digest() for node in nodes.values()}
+    digest_set = {replicas[name].digest() for name in names}
     converged = len(digest_set) == 1
-    board = nodes["alice"].replica
+    board = replicas["alice"]
     result = {
         "converged": converged,
         "shapes": len(board.shapes()),
         "dag_nodes": len(board.have()),
         "replica": board,
     }
-    for node in nodes.values():
-        await node.stop()
+    for mn in mesh_nodes.values():
+        await mn.stop()
     return result
 
 
@@ -107,7 +111,6 @@ def demo_lww(out_dir: str = "out", size: int = 400) -> dict:
 
     digests = [p.digest() for p in peers]
     converged = all(d == digests[0] for d in digests)
-
     os.makedirs(out_dir, exist_ok=True)
     render_convergence_gif(scenes, os.path.join(out_dir, "lww_convergence.gif"),
                            size=size, label=f"LWW converged: {converged}")
@@ -140,7 +143,6 @@ def demo_rga(out_dir: str = "out", size: int = 400) -> dict:
 
     digests = [p.digest() for p in peers]
     converged = all(d == digests[0] for d in digests)
-
     os.makedirs(out_dir, exist_ok=True)
     render_convergence_gif(scenes, os.path.join(out_dir, "rga_convergence.gif"),
                            size=size, label=f"RGA converged: {converged}")
@@ -149,10 +151,8 @@ def demo_rga(out_dir: str = "out", size: int = 400) -> dict:
 
 
 def demo_ormap(out_dir: str = "out", size: int = 400) -> dict:
-    proof = convergence_proof()
-    os.makedirs(out_dir, exist_ok=True)
     rng = random.Random(5)
-    peers = [Replica(f"p{i}") for i in range(3)]
+    peers = [ORMapReplica(f"p{i}") for i in range(3)]
     kinds = ["rect", "ellipse", "line"]
     colors = ["red", "green", "blue", "yellow", "cyan"]
     scenes = []
@@ -175,6 +175,7 @@ def demo_ormap(out_dir: str = "out", size: int = 400) -> dict:
 
     digests = [p.digest() for p in peers]
     converged = all(d == digests[0] for d in digests)
+    os.makedirs(out_dir, exist_ok=True)
     render_convergence_gif(scenes, os.path.join(out_dir, "ormap_convergence.gif"),
                            size=size, label=f"OR-Map converged: {converged}")
     render_scene_png(peers[0].scene(size), os.path.join(out_dir, "ormap_canvas.png"), size)
@@ -182,22 +183,24 @@ def demo_ormap(out_dir: str = "out", size: int = 400) -> dict:
 
 
 def main() -> int:
-    print("Decentralized Collaborative Canvas (OR-Map + Merkle-DAG)")
-    print("=" * 56)
+    print("collaborative-canvas-toolkit")
+    print("=" * 30)
     proof = convergence_proof()
-    print(f"[CRDT proof] {proof['peers']} peers, DAG nodes delivered shuffled+duplicated")
+    print(f"[OR-Map proof] {proof['peers']} peers, shuffled+duplicated delivery")
     print(f"  converged: {proof['converged']}  "
           f"({proof['shapes']} shapes, {proof['dag_nodes']} DAG nodes)")
 
     live = asyncio.run(live_demo())
-    print(f"[live P2P mesh] 3 peers draw a face (content-addressed sync)")
-    print(f"  all peers converged: {live['converged']}  "
+    print(f"[OR-Map live mesh] 3 peers draw a face")
+    print(f"  converged: {live['converged']}  "
           f"({live['shapes']} shapes from {live['dag_nodes']} ops)")
 
-    render_png(live["replica"], "out/canvas.png", size=400)
+    board = live["replica"]
+    os.makedirs("out", exist_ok=True)
+    render_scene_png(board.scene(400), "out/canvas.png", 400)
     print("  saved render to out/canvas.png")
     print("\nCollaborative drawing (ASCII preview):")
-    print(to_ascii(live["replica"]))
+    print(scene_to_ascii(board.scene(), 48, 24))
     return 0 if (proof["converged"] and live["converged"]) else 1
 
 

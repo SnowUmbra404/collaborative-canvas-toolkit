@@ -1,7 +1,5 @@
-"""Tests for the content-addressed Merkle-DAG."""
-
 import pytest
-from src.hashdag import HashDAG, Node, _hash
+from src.backends.hashdag import HashDAG, Node, _hash
 
 
 class TestHashing:
@@ -81,7 +79,6 @@ class TestSync:
         ids = [dag.add_op({"x": i}).id for i in range(4)]
         missing = dag.missing_for(set())
         order = [m["id"] for m in missing]
-        # Parents must precede children in the delta.
         for i in range(1, 4):
             assert order.index(ids[i - 1]) < order.index(ids[i])
 

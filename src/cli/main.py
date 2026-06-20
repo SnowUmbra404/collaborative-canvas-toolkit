@@ -44,13 +44,13 @@ def _run_render(backend: str, out_dir: str, size: int) -> int:
         path = os.path.join(out_dir, "render_rga.png")
         render_scene_png(r.scene(size), path, size)
     else:
-        from src.replica import Replica
-        from src.render import render_png
-        r = Replica("render")
+        from src.backends.ormap import ORMapReplica
+        from src.core.render import render_scene_png
+        r = ORMapReplica("render")
         r.add_shape("ellipse", 0.2, 0.2, 0.6, 0.6, "yellow")
         r.add_shape("rect", 0.1, 0.1, 0.8, 0.8, "blue")
         path = os.path.join(out_dir, "render_ormap.png")
-        render_png(r, path, size)
+        render_scene_png(r.scene(size), path, size)
     print(f"saved {path}")
     return 0
 
