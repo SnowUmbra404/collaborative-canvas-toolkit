@@ -90,11 +90,3 @@ No backend-specific code anywhere in `core/`. The anti-entropy strategies are ex
 5. Assert all `digest()` are equal
 
 The same harness runs against all three backends. 51 parametrized tests cover 3–5 peers across 15 seeds.
-
-## Original projects (archived)
-
-| Original | Backend | Source |
-|----------|---------|--------|
-| decentralized-collaborative-canvas (#41) | OR-Map + Merkle-DAG | base project |
-| distributed-collaborative-canvas (#37) | LWW pixels | logic ported natively |
-| p2p-real-time-collaborative-canvas (#40) | RGA strokes | logic ported natively |
