@@ -38,10 +38,38 @@ class Replica:
             "observed": observed,
         })
 
+    def apply_local(self, intent: dict) -> dict:
+        t = intent["type"]
+        if t == "add":
+            node = self.add_shape(
+                intent["kind"], intent["x"], intent["y"],
+                intent["w"], intent["h"], intent["color"],
+            )
+        elif t == "set":
+            node = self.set_props(intent["shape_id"], **intent.get("changes", {}))
+        elif t == "remove":
+            node = self.remove_shape(intent["shape_id"])
+        else:
+            raise ValueError(f"unknown intent type: {t!r}")
+        return node.to_dict()
+
+    def apply_remote(self, op: dict) -> bool:
+        node = Node.from_dict(op)
+        if not self.dag.verify(node):
+            return False
+        return self.dag.receive(node)
+
     def receive_node(self, node: Node) -> bool:
         if not self.dag.verify(node):
             return False
         return self.dag.receive(node)
+
+    def summary(self) -> list:
+        return sorted(self.dag.have())
+
+    def delta_since(self, remote_summary) -> list[dict]:
+        have = set(remote_summary) if remote_summary is not None else set()
+        return self.dag.missing_for(have)
 
     def shapes(self) -> list[Shape]:
         return self.state.shapes()
