@@ -1,7 +1,7 @@
 [project]
-name = "decentralized-collaborative-canvas"
+name = "collaborative-canvas-toolkit"
 version = "0.1.0"
-description = "Add your description here"
+description = "Pluggable CRDT collaborative canvas: LWW, RGA, and OR-Map backends"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
