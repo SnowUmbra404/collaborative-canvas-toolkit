@@ -2,68 +2,206 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Decentralized Canvas</title>
+<title>Collaborative Canvas Toolkit</title>
 <style>
+  * { box-sizing: border-box; }
   body { margin:0; font-family:system-ui,sans-serif; background:#11151f; color:#e6e9f0; }
   #bar { padding:10px 16px; display:flex; gap:12px; align-items:center; background:#1b2030; flex-wrap:wrap; }
-  #bar b { color:#8ab4ff; }
+  #bar b { color:#8ab4ff; font-size:15px; }
   button { background:#2a3146; color:#e6e9f0; border:1px solid #3a4260;
            border-radius:6px; padding:5px 10px; cursor:pointer; }
   button.active { background:#3a63c0; }
-  .sw { width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
+  .sw { width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid transparent; display:inline-block; }
   .sw.active { border-color:#fff; }
   canvas { display:block; margin:14px auto; background:#f8f9fc; border-radius:8px; cursor:crosshair; }
-  #info { font-size:12px; color:#9aa3b8; }
+  #status { font-size:11px; color:#9aa3b8; padding:4px 16px 8px; background:#1b2030;
+            display:flex; gap:16px; flex-wrap:wrap; border-top:1px solid #232a3e; }
+  #status span { white-space:nowrap; }
+  .converged { color:#46be5a; font-weight:bold; }
+  .syncing { color:#f09632; font-weight:bold; }
 </style>
 </head>
 <body>
 <div id="bar">
-  <b>🪐 Decentralized Canvas</b>
-  <button data-tool="rect" class="active">▭ rect</button>
-  <button data-tool="ellipse">◯ ellipse</button>
-  <button data-tool="line">／ line</button>
+  <b>Collaborative Canvas Toolkit</b>
+  <button data-tool="rect" class="active">&#9645; rect</button>
+  <button data-tool="ellipse">&#9711; ellipse</button>
+  <button data-tool="line">&#x2F; line</button>
   <span id="palette"></span>
-  <span id="info">OR-Map + Merkle-DAG · no backend</span>
 </div>
 <canvas id="c" width="600" height="600"></canvas>
-<script>
-/* Mirrors the Python OR-Map model (src/crdt.py): shapes keyed by id, add-wins
-   existence, LWW properties — would sync over WebRTC. Here it demonstrates the
-   shape model and content-addressed op ids (sha-256 in the real peer). */
-const COLORS = ["red","green","blue","yellow","orange","magenta","black"];
-const RGB = {red:"#dc3c3c",green:"#46be5a",blue:"#4682e6",yellow:"#f0d246",
-  orange:"#f09632",magenta:"#d250c8",black:"#1e1e24"};
-let tool="rect", color="blue", shapes=[], start=null, seq=0;
-const peer="web"+Math.floor(Math.random()*1000);
-const canvas=document.getElementById("c"), ctx=canvas.getContext("2d");
-const pal=document.getElementById("palette");
+<div id="status">
+  <span>Peer: <code id="st-peer"></code></span>
+  <span>Peers seen: <code id="st-peers">1</code></span>
+  <span>Shapes: <code id="st-shapes">0</code></span>
+  <span>Ops/DAG nodes: <code id="st-ops">0</code></span>
+  <span id="st-conv" class="syncing">syncing&#x2026;</span>
+</div>
+<script type="module">
+import { ORMapReplica } from "./crdt.js";
 
-document.querySelectorAll("button[data-tool]").forEach(b=>b.onclick=()=>{
-  tool=b.dataset.tool;
-  document.querySelectorAll("button[data-tool]").forEach(x=>x.classList.remove("active"));
+const COLORS = ["red","green","blue","yellow","orange","magenta","black"];
+const RGB = {
+  red:"#dc3c3c", green:"#46be5a", blue:"#4682e6", yellow:"#f0d246",
+  orange:"#f09632", magenta:"#d250c8", black:"#1e1e24"
+};
+
+const peerId = "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const replica = new ORMapReplica(peerId);
+const ch = new BroadcastChannel("canvas-crdt");
+
+let tool = "rect";
+let color = "blue";
+let start = null;
+let seenPeers = new Set([peerId]);
+let peerDigests = {};
+let lastDigest = null;
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const pal = document.getElementById("palette");
+
+document.getElementById("st-peer").textContent = peerId;
+
+document.querySelectorAll("button[data-tool]").forEach(b => b.onclick = () => {
+  tool = b.dataset.tool;
+  document.querySelectorAll("button[data-tool]").forEach(x => x.classList.remove("active"));
   b.classList.add("active");
 });
-COLORS.forEach(c=>{ const s=document.createElement("span"); s.className="sw"+(c===color?" active":"");
-  s.style.background=RGB[c]; s.onclick=()=>{ color=c;
-  [...pal.children].forEach(e=>e.classList.remove("active")); s.classList.add("active"); };
-  pal.appendChild(s); });
 
-function redraw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  for(const s of shapes){ ctx.strokeStyle=RGB[s.color]; ctx.lineWidth=4;
-    const x=s.x*canvas.width, y=s.y*canvas.height, w=s.w*canvas.width, h=s.h*canvas.height;
-    if(s.kind==="rect") ctx.strokeRect(x,y,w,h);
-    else if(s.kind==="ellipse"){ ctx.beginPath(); ctx.ellipse(x+w/2,y+h/2,Math.abs(w/2),Math.abs(h/2),0,0,7); ctx.stroke(); }
-    else { ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+w,y+h); ctx.stroke(); }
+COLORS.forEach(c => {
+  const s = document.createElement("span");
+  s.className = "sw" + (c === color ? " active" : "");
+  s.style.background = RGB[c];
+  s.onclick = () => {
+    color = c;
+    [...pal.children].forEach(e => e.classList.remove("active"));
+    s.classList.add("active");
+  };
+  pal.appendChild(s);
+});
+
+function redraw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (const s of replica.shapes()) {
+    ctx.strokeStyle = RGB[s.color] || s.color;
+    ctx.lineWidth = 4;
+    const x = s.x * canvas.width;
+    const y = s.y * canvas.height;
+    const w = s.w * canvas.width;
+    const h = s.h * canvas.height;
+    if (s.kind === "rect") {
+      ctx.strokeRect(x, y, w, h);
+    } else if (s.kind === "ellipse") {
+      ctx.beginPath();
+      ctx.ellipse(x + w / 2, y + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + w, y + h);
+      ctx.stroke();
+    }
+  }
+  updateStatus();
+}
+
+function updateStatus() {
+  const digest = replica.digest();
+  lastDigest = digest;
+  const shapes = replica.shapes();
+  document.getElementById("st-peers").textContent = seenPeers.size;
+  document.getElementById("st-shapes").textContent = shapes.length;
+  document.getElementById("st-ops").textContent = Object.keys(replica.nodes).length;
+
+  const convEl = document.getElementById("st-conv");
+  const allDigests = Object.values(peerDigests);
+  if (allDigests.length === 0 || (allDigests.every(d => d === digest) && seenPeers.size <= 1)) {
+    convEl.textContent = "converged ✓";
+    convEl.className = "converged";
+  } else if (allDigests.every(d => d === digest)) {
+    convEl.textContent = "converged ✓";
+    convEl.className = "converged";
+  } else {
+    convEl.textContent = "syncing…";
+    convEl.className = "syncing";
   }
 }
-canvas.addEventListener("mousedown",e=>{ const r=canvas.getBoundingClientRect();
-  start={x:(e.clientX-r.left)/canvas.width, y:(e.clientY-r.top)/canvas.height}; });
-window.addEventListener("mouseup",e=>{ if(!start) return; const r=canvas.getBoundingClientRect();
-  const ex=(e.clientX-r.left)/canvas.width, ey=(e.clientY-r.top)/canvas.height;
-  shapes.push({id:peer+":"+(++seq), kind:tool, color, x:Math.min(start.x,ex),
-    y:Math.min(start.y,ey), w:Math.abs(ex-start.x), h:Math.abs(ey-start.y)});
-  start=null; redraw(); });
+
+function broadcast(msg) {
+  ch.postMessage(msg);
+}
+
+async function applyRemoteOps(ops) {
+  for (const node of ops) {
+    await replica.receive(node);
+  }
+  redraw();
+}
+
+ch.onmessage = async (e) => {
+  const msg = e.data;
+  if (!msg || !msg.type) return;
+  const from = msg.from;
+  if (from && from !== peerId) seenPeers.add(from);
+
+  if (msg.type === "op") {
+    await replica.receive(msg.node);
+    redraw();
+    broadcast({ type: "digest", from: peerId, digest: replica.digest() });
+  } else if (msg.type === "join") {
+    const missing = replica.missingFor(new Set(msg.have || []));
+    if (missing.length > 0) {
+      broadcast({ type: "sync-reply", from: peerId, to: msg.from, ops: missing });
+    }
+    broadcast({ type: "digest", from: peerId, digest: replica.digest() });
+  } else if (msg.type === "sync-reply") {
+    if (msg.to !== peerId) return;
+    await applyRemoteOps(msg.ops || []);
+    broadcast({ type: "digest", from: peerId, digest: replica.digest() });
+  } else if (msg.type === "digest") {
+    if (from && from !== peerId) {
+      peerDigests[from] = msg.digest;
+      seenPeers.add(from);
+    }
+    updateStatus();
+  }
+};
+
+function broadcastDigestPeriodically() {
+  broadcast({ type: "digest", from: peerId, digest: replica.digest() });
+  setTimeout(broadcastDigestPeriodically, 2000);
+}
+
+broadcast({ type: "join", from: peerId, have: replica.summary() });
+broadcastDigestPeriodically();
+
+canvas.addEventListener("mousedown", e => {
+  const r = canvas.getBoundingClientRect();
+  start = {
+    x: (e.clientX - r.left) / canvas.width,
+    y: (e.clientY - r.top) / canvas.height,
+  };
+});
+
+window.addEventListener("mouseup", async e => {
+  if (!start) return;
+  const r = canvas.getBoundingClientRect();
+  const ex = (e.clientX - r.left) / canvas.width;
+  const ey = (e.clientY - r.top) / canvas.height;
+  const x = Math.min(start.x, ex);
+  const y = Math.min(start.y, ey);
+  const w = Math.abs(ex - start.x);
+  const h = Math.abs(ey - start.y);
+  start = null;
+  if (w < 0.005 && h < 0.005) return;
+  const node = await replica.addShape(tool, x, y, w, h, color);
+  redraw();
+  broadcast({ type: "op", from: peerId, node });
+  broadcast({ type: "digest", from: peerId, digest: replica.digest() });
+});
+
+redraw();
 </script>
 </body>
 </html>
