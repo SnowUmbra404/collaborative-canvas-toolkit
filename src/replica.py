@@ -68,7 +68,7 @@ class Replica:
         return sorted(self.dag.have())
 
     def delta_since(self, remote_summary) -> list[dict]:
-        have = set(remote_summary) if remote_summary is not None else set()
+        have = set(remote_summary) if remote_summary else set()
         return self.dag.missing_for(have)
 
     def shapes(self) -> list[Shape]:

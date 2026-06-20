@@ -121,7 +121,7 @@ class RGAReplica:
         out = []
         for el in self._elements.values():
             seq, peer = el.id
-            if seq > vv.get(peer, 0) or el.deleted:
+            if seq > vv.get(peer, 0) or (el.deleted and seq <= vv.get(peer, 0)):
                 out.append(el.to_dict())
         return out
 
