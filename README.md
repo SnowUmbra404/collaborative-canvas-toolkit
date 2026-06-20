@@ -57,7 +57,7 @@ src/
     rga.py         RGA stroke backend
     ormap.py       OR-Map fold logic (fold_ops takes list[Node])
     hashdag.py     Merkle-DAG anti-entropy (standalone from OR-Map)
-  cli/main.py      --backend {lww,rga,ormap} demo|render
+  cli/main.py      --backend {lww,rga,ormap} demo [--gif] | render | viz-dag | peer | web
 tests/
   test_lww.py      LWW unit + property (9 tests)
   test_rga.py      RGA unit + property (10 tests)
@@ -79,6 +79,12 @@ uv run python -m src.cli.main --backend rga demo
 uv run python -m src.cli.main --backend ormap demo
 
 uv run python -m src.cli.main --backend lww render
+
+uv run python -m src.cli.main --backend ormap demo --gif
+uv run python -m src.cli.main viz-dag
+uv run python -m src.cli.main peer --port 9001 --id alice
+uv run python -m src.cli.main peer --port 9002 --id bob --seeds localhost:9001
+uv run python -m src.cli.main web --port 8080
 ```
 
 ## What the three backends demonstrate
